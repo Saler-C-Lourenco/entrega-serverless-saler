@@ -1,13 +1,17 @@
+from flask import Flask, request, jsonify
 from sqlalchemy import create_engine, Column, String, Integer, Float, Enum, ForeignKey, DateTime
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker, joinedload
 from datetime import datetime, timezone
-import enum, uuid, json
+import enum, uuid
+
+
+# Configuração do Flask
+app = Flask(__name__)
 
 # Criando conexão com o banco de dados
 engine = create_engine('mysql+pymysql://root:root@localhost:3306/entrega_serverless_db', echo=True, pool_pre_ping=True)
 Base = declarative_base()
 Session = sessionmaker(bind=engine)
-session = Session()
 
 # ENTIDADES
 
@@ -31,7 +35,6 @@ class Pedido(Base):
     itens = relationship("Item", back_populates="pedido", cascade="all, delete-orphan")
 
     def to_dict(self):
-        """ Converte um objeto Pedido para dicionário JSON """
         return {
             "id": self.id,
             "cliente": self.cliente,
@@ -55,7 +58,6 @@ class Item(Base):
     pedido = relationship("Pedido", back_populates="itens")
 
     def to_dict(self):
-        """ Converte um objeto Item para dicionário JSON """
         return {
             "id": self.id,
             "produto": self.produto,
@@ -63,53 +65,72 @@ class Item(Base):
             "preco": self.preco
         }
 
-# Criar as tabelas no banco de dados (DDL auto create)
+# Criar tabelas
 Base.metadata.create_all(engine)
 
-# REPOSITORIES  
+# ROTAS FLASK (API REST)
 
+@app.route('/listall', methods=['GET'])
 def listAll():
-    """ Retorna todos os pedidos no formato JSON """
-    pedidos = session.query(Pedido).all()
-    return json.dumps([pedido.to_dict() for pedido in pedidos], indent=4, ensure_ascii=False)
+    """ Retorna todos os pedidos """
+    session = Session()
+    pedidos = session.query(Pedido).options(joinedload(Pedido.itens)).all()
+    session.close()
+    return jsonify([pedido.to_dict() for pedido in pedidos])
 
+@app.route('/findbyid/<string:pedido_id>', methods=['GET'])
 def findById(pedido_id):
-    """ Busca um pedido pelo ID e retorna no formato JSON """
-    pedido = session.query(Pedido).filter_by(id=pedido_id).first()
+    """ Busca um pedido pelo ID """
+    session = Session()
+    pedido = session.query(Pedido).filter_by(id=pedido_id).options(joinedload(Pedido.itens)).first()
+    session.close()
     if pedido:
-        return json.dumps(pedido.to_dict(), indent=4, ensure_ascii=False)
-    return json.dumps({"message": "Pedido não encontrado"}, indent=4)
+        return jsonify(pedido.to_dict())
+    return jsonify({"message": "Pedido não encontrado"}), 404
 
-def save(pedido_data):
-    """ Salva um novo pedido no banco de dados """
-    pedido = Pedido(
-        id=pedido_data.get("id", str(uuid.uuid4())),
-        cliente=pedido_data["cliente"],
-        email=pedido_data["email"],
-        total=pedido_data["total"],
-        status=StatusPedidoEnum[pedido_data["status"]],
-        data_criacao=datetime.fromisoformat(pedido_data["data_criacao"]),
-        data_atualizacao=datetime.fromisoformat(pedido_data["data_atualizacao"])
-    )
+@app.route('/save', methods=['POST'])
+def save():
+    """ Salva um novo pedido """
+    session = Session()
+    pedido_data = request.json
     
-    for item_data in pedido_data["itens"]:
-        item = Item(
-            produto=item_data["produto"],
-            quantidade=item_data["quantidade"],
-            preco=item_data["preco"]
+    try:
+        pedido = Pedido(
+            id=pedido_data.get("id", str(uuid.uuid4())),
+            cliente=pedido_data["cliente"],
+            email=pedido_data["email"],
+            total=pedido_data["total"],
+            status=StatusPedidoEnum[pedido_data["status"]],
+            data_criacao=datetime.fromisoformat(pedido_data["data_criacao"]),
+            data_atualizacao=datetime.fromisoformat(pedido_data["data_atualizacao"])
         )
-        pedido.itens.append(item)
 
-    session.add(pedido)
-    session.commit()
-    return json.dumps({"message": "Pedido salvo com sucesso!"}, indent=4)
+        for item_data in pedido_data["itens"]:
+            item = Item(
+                produto=item_data["produto"],
+                quantidade=item_data["quantidade"],
+                preco=item_data["preco"]
+            )
+            pedido.itens.append(item)
 
-def update(pedido_id, update_data):
+        session.add(pedido)
+        session.commit()
+        session.close()
+        return jsonify({"message": "Pedido salvo com sucesso!"}), 201
+    except Exception as e:
+        session.rollback()
+        return jsonify({"message": "Erro ao salvar pedido", "error": str(e)}), 500
+
+@app.route('/update/<string:pedido_id>', methods=['PUT'])
+def update(pedido_id):
     """ Atualiza um pedido pelo ID """
+    session = Session()
     pedido = session.query(Pedido).filter_by(id=pedido_id).first()
     if not pedido:
-        return json.dumps({"message": "Pedido não encontrado"}, indent=4)
+        session.close()
+        return jsonify({"message": "Pedido não encontrado"}), 404
 
+    update_data = request.json
     if "cliente" in update_data:
         pedido.cliente = update_data["cliente"]
     if "email" in update_data:
@@ -122,40 +143,23 @@ def update(pedido_id, update_data):
     pedido.data_atualizacao = datetime.now(timezone.utc)
 
     session.commit()
-    return json.dumps({"message": "Pedido atualizado com sucesso!"}, indent=4)
+    session.close()
+    return jsonify({"message": "Pedido atualizado com sucesso!"})
 
+@app.route('/delete/<string:pedido_id>', methods=['DELETE'])
 def delete(pedido_id):
     """ Deleta um pedido pelo ID """
+    session = Session()
     pedido = session.query(Pedido).filter_by(id=pedido_id).first()
     if not pedido:
-        return json.dumps({"message": "Pedido não encontrado"}, indent=4)
+        session.close()
+        return jsonify({"message": "Pedido não encontrado"}), 404
 
     session.delete(pedido)
     session.commit()
-    return json.dumps({"message": "Pedido deletado com sucesso!"}, indent=4)
+    session.close()
+    return jsonify({"message": "Pedido deletado com sucesso!"})
 
-# Exemplo de chamada
-if __name__ == "__main__":
-    print(listAll())  # Lista todos os pedidos
-
-    novo_pedido = {
-        "id": "123e4567-e89b-12d3-a456-426614174000",
-        "cliente": "João Silva",
-        "email": "joao@email.com",
-        "total": 13.50,
-        "status": "PENDENTE",
-        "data_criacao": "2025-02-23T12:00:00+00:00",
-        "data_atualizacao": "2025-02-23T12:00:00+00:00",
-        "itens": [
-            {"produto": "Café Expresso", "quantidade": 2, "preco": 5.00},
-            {"produto": "Pão de Queijo", "quantidade": 1, "preco": 3.50}
-        ]
-    }
-
-    print(save(novo_pedido))  # Salva um novo pedido
-    print(findById("123e4567-e89b-12d3-a456-426614174000"))  # Busca pelo ID
-    print(update("123e4567-e89b-12d3-a456-426614174000", {"status": "ENVIADO"}))  # Atualiza
-    print(delete("123e4567-e89b-12d3-a456-426614174000"))  # Deleta
-
-# Fechar a sessão
-session.close()
+# Iniciar o servidor
+if __name__ == '__main__':
+    app.run(debug=True)
