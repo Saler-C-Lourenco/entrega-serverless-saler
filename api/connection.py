@@ -27,6 +27,20 @@ class Pedido(Base):
     data_atualizacao = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     
     itens = relationship("Item", back_populates="pedido", cascade="all, delete-orphan")
+
+    def to_dict(self):
+        """ Converte um objeto Pedido para dicionário JSON """
+        return {
+            "id": self.id,
+            "cliente": self.cliente,
+            "email": self.email,
+            "total": self.total,
+            "status": self.status.value,
+            "data_criacao": self.data_criacao.isoformat(),
+            "data_atualizacao": self.data_atualizacao.isoformat(),
+            "itens": [item.to_dict() for item in self.itens]
+        }
+
 class Item(Base):
     __tablename__ = "itens"
 
@@ -38,65 +52,26 @@ class Item(Base):
     
     pedido = relationship("Pedido", back_populates="itens")
 
+    def to_dict(self):
+        """ Converte um objeto Item para dicionário JSON """
+        return {
+            "id": self.id,
+            "produto": self.produto,
+            "quantidade": self.quantidade,
+            "preco": self.preco
+        }
+
 # Criar as tabelas no banco de dados (DDL auto create)
 Base.metadata.create_all(engine)
 
-# Dados fictícios fornecidos no JSON
-json_data = """
-{
-    "id": "123e4567-e89b-12d3-a456-426614174000",
-    "cliente": "João Silva",
-    "email": "joao@email.com",
-    "itens": [
-        { "produto": "Café Expresso", "quantidade": 2, "preco": 5.00 },
-        { "produto": "Pão de Queijo", "quantidade": 1, "preco": 3.50 }
-    ],
-    "total": 13.50,
-    "status": "PENDENTE",
-    "data_criacao": "2025-02-23T12:00:00Z",
-    "data_atualizacao": "2025-02-23T12:00:00Z"
-}
-"""
+def listAll():
+    """ Retorna todos os pedidos no formato JSON """
+    pedidos = session.query(Pedido).all()
+    pedidos_json = json.dumps([pedido.to_dict() for pedido in pedidos], indent=4, ensure_ascii=False)
+    return pedidos_json
 
-# Converter JSON para dicionário
-data = json.loads(json_data)
+# Executar listAll e exibir o resultado
+print(listAll())
 
-# Verificar se o pedido já existe no banco
-existing_pedido = session.query(Pedido).filter_by(id=data["id"]).first()
-
-if not existing_pedido:
-    # Criando um novo pedido
-    novo_pedido = Pedido(
-        id=data["id"],
-        cliente=data["cliente"],
-        email=data["email"],
-        total=data["total"],
-        status=StatusPedidoEnum[data["status"]],
-        data_criacao=datetime.fromisoformat(data["data_criacao"].replace("Z", "+00:00")),
-        data_atualizacao=datetime.fromisoformat(data["data_atualizacao"].replace("Z", "+00:00"))
-    )
-
-    # Criando os itens do pedido
-    for item in data["itens"]:
-        novo_item = Item(
-            produto=item["produto"],
-            quantidade=item["quantidade"],
-            preco=item["preco"],
-            pedido=novo_pedido  # Relacionamento automático
-        )
-        session.add(novo_item)
-
-    # Adiciona o pedido ao banco de dados
-    session.add(novo_pedido)
-    session.commit()
-    print("Pedido e itens inseridos com sucesso!")
-
-else:
-    print("Pedido já existe no banco de dados.")
-
-data = session.query(Pedido).all()
-print(data)
-print(data[0])
-
-
+# Fechar a sessão
 session.close()
