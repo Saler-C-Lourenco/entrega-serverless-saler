@@ -4,12 +4,18 @@ from sqlalchemy.orm import declarative_base, relationship, sessionmaker, joinedl
 from datetime import datetime, timezone
 import enum, uuid
 
+from config import SQLALCHEMY_DATABASE_URI
+
 
 # Configuração do Flask
 app = Flask(__name__)
+# if __name__ == '__main__':
+#     app.run(host='0.0.0.0', port=8080)
+
 
 # Criando conexão com o banco de dados
-engine = create_engine('mysql+pymysql://root:root@localhost:3306/entrega_serverless_db', echo=True, pool_pre_ping=True)
+engine = create_engine(SQLALCHEMY_DATABASE_URI, echo=True, pool_pre_ping=True)
+
 Base = declarative_base()
 Session = sessionmaker(bind=engine)
 
@@ -69,6 +75,10 @@ class Item(Base):
 Base.metadata.create_all(engine)
 
 # ROTAS FLASK (API REST)
+
+@app.route('/')
+def hello_world():
+    return 'Hello, Cloud Functions!'
 
 @app.route('/pedidos', methods=['GET'])
 def listAll():
@@ -168,4 +178,4 @@ def delete(pedido_id):
 
 # Iniciar o servidor
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=8080)
