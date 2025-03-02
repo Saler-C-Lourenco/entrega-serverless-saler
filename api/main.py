@@ -9,8 +9,6 @@ from config import SQLALCHEMY_DATABASE_URI
 
 # Configuração do Flask
 app = Flask(__name__)
-# if __name__ == '__main__':
-#     app.run(host='0.0.0.0', port=8080)
 
 
 # Criando conexão com o banco de dados
@@ -176,6 +174,13 @@ def delete(pedido_id):
     session.close()
     return jsonify({"message": "Pedido deletado com sucesso!"})
 
+
 # Iniciar o servidor
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=8080)
+
+# Defina a função de entrada para o Cloud Functions
+def flask_function(request):
+    """Ponto de entrada do Cloud Functions para servir a API Flask"""
+    with app.request_context(request.environ):
+        return app.full_dispatch_request()
