@@ -70,7 +70,7 @@ Base.metadata.create_all(engine)
 
 # ROTAS FLASK (API REST)
 
-@app.route('/listall', methods=['GET'])
+@app.route('/pedidos', methods=['GET'])
 def listAll():
     """ Retorna todos os pedidos """
     session = Session()
@@ -78,7 +78,7 @@ def listAll():
     session.close()
     return jsonify([pedido.to_dict() for pedido in pedidos])
 
-@app.route('/findbyid/<string:pedido_id>', methods=['GET'])
+@app.route('/pedidos/<string:pedido_id>', methods=['GET'])
 def findById(pedido_id):
     """ Busca um pedido pelo ID """
     session = Session()
@@ -88,7 +88,7 @@ def findById(pedido_id):
         return jsonify(pedido.to_dict())
     return jsonify({"message": "Pedido não encontrado"}), 404
 
-@app.route('/save', methods=['POST'])
+@app.route('/pedidos', methods=['POST'])
 def save():
     """ Salva um novo pedido """
     session = Session()
@@ -120,33 +120,39 @@ def save():
     except Exception as e:
         session.rollback()
         return jsonify({"message": "Erro ao salvar pedido", "error": str(e)}), 500
-
-@app.route('/update/<string:pedido_id>', methods=['PUT'])
-def update(pedido_id):
-    """ Atualiza um pedido pelo ID """
+@app.route('/pedidos/<string:pedido_id>', methods=['PATCH'])
+def update_status(pedido_id):
+    """ Atualiza apenas o status de um pedido pelo ID """
     session = Session()
     pedido = session.query(Pedido).filter_by(id=pedido_id).first()
+    
     if not pedido:
         session.close()
         return jsonify({"message": "Pedido não encontrado"}), 404
 
     update_data = request.json
-    if "cliente" in update_data:
-        pedido.cliente = update_data["cliente"]
-    if "email" in update_data:
-        pedido.email = update_data["email"]
-    if "total" in update_data:
-        pedido.total = update_data["total"]
-    if "status" in update_data:
+    if "status" not in update_data:
+        session.close()
+        return jsonify({"message": "Campo 'status' é obrigatório"}), 400
+
+    try:
         pedido.status = StatusPedidoEnum[update_data["status"]]
+    except KeyError:
+        session.close()
+        return jsonify({"message": "Status inválido"}), 400
 
     pedido.data_atualizacao = datetime.now(timezone.utc)
 
     session.commit()
-    session.close()
-    return jsonify({"message": "Pedido atualizado com sucesso!"})
 
-@app.route('/delete/<string:pedido_id>', methods=['DELETE'])
+    # Captura o status antes de fechar a sessão para evitar erro de DetachedInstance
+    status_atualizado = pedido.status.name
+
+    session.close()
+
+    return jsonify({"message": "Pedido atualizado com sucesso", "status": status_atualizado}), 200
+
+@app.route('/pedidos/<string:pedido_id>', methods=['DELETE'])
 def delete(pedido_id):
     """ Deleta um pedido pelo ID """
     session = Session()
